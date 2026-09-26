@@ -18,29 +18,64 @@ class Trainer:
         self.cfg       = cfg
         self.device    = device
 
+        # ── Optimizer (fused=True acelera bastante em CUDA) ──
+        fused_ok = (
+            device.type == "cuda"
+            and "fused" in torch.optim.AdamW.__init__.__code__.co_varnames
+        )
         self.optimizer = torch.optim.AdamW(
             model.parameters(),
             lr           = cfg.training.lr,
             betas        = (0.9, 0.95),
             weight_decay = 0.1,
+            fused        = fused_ok,
         )
+
+        # ── Mixed precision ───────────────────────────────
+        # CUDA  → fp16 + GradScaler (maior ganho de velocidade)
+        # CPU   → bf16 autocast, sem scaler (bf16 não sofre com underflow)
+        # MPS   → amp ainda instável no PyTorch, mantemos fp32
+        self.amp_enabled = cfg.hardware.amp and device.type in ("cuda", "cpu")
+        self.amp_dtype   = torch.float16 if device.type == "cuda" else torch.bfloat16
+        self.scaler = torch.cuda.amp.GradScaler(
+            enabled = (self.amp_enabled and device.type == "cuda")
+        )
+
+        # ── Gradient accumulation ─────────────────────────
+        self.accum_steps = max(1, cfg.training.grad_accum_steps)
+
+        # ── torch.compile (ganho grande em CUDA moderno) ──
+        if cfg.hardware.compile and device.type == "cuda":
+            try:
+                self.model = torch.compile(self.model)
+                print("  ⚡ torch.compile() ativado")
+            except Exception as e:
+                print(f"  ⚠️  torch.compile() falhou, seguindo sem: {e}")
 
         self.scheduler     = self._build_scheduler()
         self.best_val_loss = float("inf")
         self.history       = {"epochs": []}
 
-        print(f"  🖥️  Device     : {device}")
-        print(f"  🧠 Parâmetros : {model.num_params():,}")
-        print(f"  📈 LR         : {cfg.training.lr}")
+        print(f"  🖥️  Device        : {device}")
+        print(f"  🧠 Parâmetros    : {model.num_params():,}")
+        print(f"  📈 LR            : {cfg.training.lr}")
+        print(f"  🎛️  AMP           : {self.amp_enabled} ({self.amp_dtype if self.amp_enabled else '-'})")
+        print(f"  🧩 Grad accum    : {self.accum_steps}x (batch efetivo = {cfg.training.batch_size * self.accum_steps})")
+        print(f"  🚀 Optimizer     : AdamW{' (fused)' if fused_ok else ''}")
 
     def _build_scheduler(self):
-        sc    = self.cfg.training.scheduler
-        total = self.cfg.training.epochs * len(self.train_dl)
+        sc = self.cfg.training.scheduler
+
+        # steps_per_epoch conta passos de OPTIMIZER, não batches,
+        # já que com grad accumulation o optimizer.step() roda
+        # a cada `accum_steps` batches.
+        steps_per_epoch = math.ceil(len(self.train_dl) / self.accum_steps)
+        total  = self.cfg.training.epochs * steps_per_epoch
 
         if not sc.enabled or sc.type == "none":
             return None
 
-        warmup = sc.warmup_epochs * len(self.train_dl)
+        warmup = sc.warmup_epochs * steps_per_epoch
 
         if sc.type == "cosine":
             from torch.optim.lr_scheduler import (
@@ -73,25 +108,51 @@ class Trainer:
 
     def _train_epoch(self, epoch: int) -> float:
         self.model.train()
-        total    = 0.0
-        t0       = time.time()
-        n        = len(self.train_dl)
+        total     = 0.0
+        t0        = time.time()
+        n         = len(self.train_dl)
         log_every = max(1, n * self.cfg.logging.log_every_pct // 100)
 
+        self.optimizer.zero_grad(set_to_none=True)
+
         for step, (x, y) in enumerate(self.train_dl):
-            x, y     = x.to(self.device), y.to(self.device)
-            _, loss  = self.model(x, y)
+            x = x.to(self.device, non_blocking=True)
+            y = y.to(self.device, non_blocking=True)
 
-            self.optimizer.zero_grad(set_to_none=True)
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(
-                self.model.parameters(),
-                self.cfg.training.grad_clip,
-            )
-            self.optimizer.step()
+            with torch.autocast(
+                device_type = self.device.type,
+                dtype       = self.amp_dtype,
+                enabled     = self.amp_enabled,
+            ):
+                _, loss = self.model(x, y)
+                loss_scaled = loss / self.accum_steps
 
-            if self.scheduler:
-                self.scheduler.step()
+            if self.scaler.is_enabled():
+                self.scaler.scale(loss_scaled).backward()
+            else:
+                loss_scaled.backward()
+
+            is_last_micro_step = (step + 1) % self.accum_steps == 0 or (step + 1) == n
+
+            if is_last_micro_step:
+                if self.scaler.is_enabled():
+                    self.scaler.unscale_(self.optimizer)
+
+                torch.nn.utils.clip_grad_norm_(
+                    self.model.parameters(),
+                    self.cfg.training.grad_clip,
+                )
+
+                if self.scaler.is_enabled():
+                    self.scaler.step(self.optimizer)
+                    self.scaler.update()
+                else:
+                    self.optimizer.step()
+
+                self.optimizer.zero_grad(set_to_none=True)
+
+                if self.scheduler:
+                    self.scheduler.step()
 
             total += loss.item()
 
@@ -112,9 +173,15 @@ class Trainer:
         self.model.eval()
         total = 0.0
         for x, y in self.val_dl:
-            x, y    = x.to(self.device), y.to(self.device)
-            _, loss = self.model(x, y)
-            total  += loss.item()
+            x = x.to(self.device, non_blocking=True)
+            y = y.to(self.device, non_blocking=True)
+            with torch.autocast(
+                device_type = self.device.type,
+                dtype       = self.amp_dtype,
+                enabled     = self.amp_enabled,
+            ):
+                _, loss = self.model(x, y)
+            total += loss.item()
         return total / max(len(self.val_dl), 1)
 
     # ── Amostra ──────────────────────────────────────────

@@ -78,6 +78,8 @@ def main():
         context_len = cfg.model.context_len,
         batch_size  = cfg.training.batch_size,
         val_ratio   = cfg.val_ratio,
+        num_workers = cfg.hardware.num_workers,
+        pin_memory  = cfg.hardware.pin_memory,
     )
     print()
 

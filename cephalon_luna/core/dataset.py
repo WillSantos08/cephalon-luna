@@ -27,6 +27,8 @@ def build_loaders(
     context_len: int,
     batch_size:  int,
     val_ratio:   float = 0.1,
+    num_workers: int   = 0,
+    pin_memory:  bool  = True,
 ) -> Tuple[DataLoader, DataLoader]:
     """Divide em treino/val e retorna DataLoaders."""
 
@@ -34,17 +36,26 @@ def build_loaders(
     train_ds = LunaDataset(token_ids[:split], context_len)
     val_ds   = LunaDataset(token_ids[split:], context_len)
 
+    # persistent_workers só faz sentido com workers > 0
+    persistent = num_workers > 0
+
     train_dl = DataLoader(
         train_ds,
-        batch_size = batch_size,
-        shuffle    = True,
-        drop_last  = True,
+        batch_size          = batch_size,
+        shuffle             = True,
+        drop_last           = True,
+        num_workers         = num_workers,
+        pin_memory          = pin_memory,
+        persistent_workers  = persistent,
     )
     val_dl = DataLoader(
         val_ds,
-        batch_size = batch_size,
-        shuffle    = False,
-        drop_last  = True,
+        batch_size          = batch_size,
+        shuffle             = False,
+        drop_last           = True,
+        num_workers         = num_workers,
+        pin_memory          = pin_memory,
+        persistent_workers  = persistent,
     )
 
     print(f"  📦 Train : {len(train_ds):,} sequências")

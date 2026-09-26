@@ -114,12 +114,13 @@ def load_config(path: str = "config.yaml") -> LunaConfig:
     # Training
     t = raw["training"]
     training = TrainingConfig(
-        epochs     = t["epochs"],
-        batch_size = t["batch_size"],
-        lr         = float(t["lr"]),
-        grad_clip  = t["grad_clip"],
-        resume     = t["resume"],
-        scheduler  = scheduler,
+        epochs           = t["epochs"],
+        batch_size       = t["batch_size"],
+        lr               = float(t["lr"]),
+        grad_clip        = t["grad_clip"],
+        resume           = t["resume"],
+        grad_accum_steps = t.get("grad_accum_steps", 1),
+        scheduler        = scheduler,
     )
 
     # Generation
@@ -149,8 +150,12 @@ def load_config(path: str = "config.yaml") -> LunaConfig:
     # Hardware
     hw = raw["hardware"]
     hardware = HardwareConfig(
-        device = hw["device"],
-        seed   = hw["seed"],
+        device      = hw["device"],
+        seed        = hw["seed"],
+        amp         = hw.get("amp", True),
+        compile     = hw.get("compile", False),
+        num_workers = hw.get("num_workers", 0),
+        pin_memory  = hw.get("pin_memory", True),
     )
 
     return LunaConfig(

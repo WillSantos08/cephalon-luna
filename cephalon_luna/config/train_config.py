@@ -11,12 +11,13 @@ class SchedulerConfig:
 
 @dataclass
 class TrainingConfig:
-    epochs:     int             = 20
-    batch_size: int             = 16
-    lr:         float           = 3e-4
-    grad_clip:  float           = 1.0
-    resume:     bool            = False
-    scheduler:  SchedulerConfig = field(
+    epochs:            int             = 20
+    batch_size:        int             = 16
+    lr:                float           = 3e-4
+    grad_clip:         float           = 1.0
+    resume:            bool            = False
+    grad_accum_steps:  int             = 1
+    scheduler:         SchedulerConfig = field(
         default_factory=SchedulerConfig
     )
 
@@ -54,5 +55,9 @@ class PathsConfig:
 
 @dataclass
 class HardwareConfig:
-    device: str = "auto"
-    seed:   int = 42
+    device:      str  = "auto"
+    seed:        int  = 42
+    amp:         bool = True   # mixed precision (fp16/bf16) quando suportado
+    compile:     bool = False  # torch.compile() — só vale a pena em CUDA
+    num_workers: int  = 0      # workers do DataLoader (0 = processo principal)
+    pin_memory:  bool = True   # acelera transferência CPU → GPU

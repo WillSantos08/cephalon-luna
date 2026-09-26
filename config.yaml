@@ -44,6 +44,7 @@ training:
   lr:              3e-4
   grad_clip:       1.0
   resume:          false
+  grad_accum_steps: 1
 
   scheduler:
     enabled:       true
@@ -82,5 +83,9 @@ logging:
 #  HARDWARE
 # ───────────────────────────────────────────────────────
 hardware:
-  device:          "cpu"
+  device:          "auto"
   seed:            42
+  amp:             true
+  compile:         false
+  num_workers:     2
+  pin_memory:      true
