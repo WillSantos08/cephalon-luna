@@ -74,10 +74,18 @@ logging:
   show_samples:    true
   num_samples:     1
   sample_prompts:
+    # Persona/identidade — o tipo mais comum no seu dataset
+    - "<usr>Como a Luna demonstra identidade própria em uma abertura de conversa?<sep>"
+    # Explicação didática de regra gramatical
+    - "<usr>Como Luna explicaria crase antes de feminino determinado a um Operador apressado?<sep>"
+    # Tarefa de correção direta (formato `Ajuste ...`)
+    - "<usr>Ajuste `Aprendi crase através de exemplos` sem perder a intenção original.<sep>"
+    # Meta-instrução sobre tom/comportamento
+    - "<usr>Como Luna responderia a \"corrija meu texto sem me humilhar\" sem perder precisão?<sep>"
+    # Correção cirúrgica de frase (formato bem representado no corpus)
+    - "<usr>Faça uma revisão cirúrgica de `Entreguei o relatório a equipe`.<sep>"
+    # Fora da distribuição de propósito — testa se ela generaliza para o casual
     - "<usr>Olá cephalon!<sep>"
-    - "<usr>Você sabe que é uma IA?<sep>"
-    - "<usr>Você tem identidade própria?<sep>"
-    - "<usr>Você tem sentimentos?<sep>"
 
 # ───────────────────────────────────────────────────────
 #  HARDWARE
